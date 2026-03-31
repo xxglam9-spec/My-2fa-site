@@ -9,51 +9,96 @@ const BOT_TOKEN = '8347968051:AAEThb_Nmqy-bhdsZwmEnsBSQgXVc-fGYbs';
 const MY_CHAT_ID = '7554731151'; 
 
 const bot = new Telegraf(BOT_TOKEN);
-const activeAuths = {}; // Temporary memory to store login sessions
+const activeAuths = {}; 
 
-app.use(express.static('public'));
+// --- STEP 1: THE WEBSITE (The "Face" of your app) ---
+app.get('/', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Secure 2FA Login</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <script src="/socket.io/socket.io.js"></script>
+            <style>
+                body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f0f2f5; }
+                .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 300px; }
+                input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+                button { width: 100%; padding: 12px; background: #0088cc; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+                #number-display { font-size: 60px; font-weight: bold; margin: 20px 0; color: #1c1e21; display: none; }
+            </style>
+        </head>
+        <body>
+            <div class="card" id="box">
+                <h2>Login</h2>
+                <input type="email" id="email" placeholder="Enter Email">
+                <button onclick="requestLogin()">Continue</button>
+            </div>
 
-// STEP 1: Web Browser starts the login
+            <script>
+                const socket = io();
+                function requestLogin() {
+                    const email = document.getElementById('email').value;
+                    if(!email) return alert("Enter email!");
+                    socket.emit('request_login', email);
+                }
+
+                socket.on('show_number', (num) => {
+                    document.getElementById('box').innerHTML = \`
+                        <h2>Match the Number</h2>
+                        <p>Tap this number on your Telegram app:</p>
+                        <div id="number-display" style="display:block;">\${num}</div>
+                        <p style="font-size:12px; color:gray;">Waiting for you to tap...</p>
+                    \`;
+                });
+
+                socket.on('login_success', () => {
+                    document.getElementById('box').innerHTML = "<h1>✅ Access Granted!</h1><p>You are now logged in.</p>";
+                });
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+// --- STEP 2: THE LOGIC (The "Brain") ---
 io.on('connection', (socket) => {
     socket.on('request_login', (email) => {
         const correctNum = Math.floor(Math.random() * 90 + 10);
         const decoys = [Math.floor(Math.random() * 90 + 10), Math.floor(Math.random() * 90 + 10)];
         
-        // Store session: Key is email, value is the secret number and the socket connection
         activeAuths[email] = { number: correctNum, socketId: socket.id };
-
-        // Shuffle buttons so the correct one isn't always first
         const buttons = [correctNum, ...decoys].sort(() => Math.random() - 0.5);
 
-        // STEP 2: Server sends the "Push" to Telegram
-        bot.telegram.sendMessage(MY_CHAT_ID, `🚨 Login Attempt: ${email}\nTap the matching number on your screen:`, 
-            Markup.inlineKeyboard(
+        bot.telegram.sendMessage(MY_CHAT_ID, `🚨 *Login Attempt:* \`${email}\` \n\nTap the number you see on your screen:`, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(
                 buttons.map(num => Markup.button.callback(num.toString(), `auth_${email}_${num}`))
             )
-        );
+        });
 
-        // Tell the browser which number to show
         socket.emit('show_number', correctNum);
-        console.log(`[SERVER] Sent number ${correctNum} to Telegram for ${email}`);
     });
 });
 
-// STEP 3: Handle the button tap on Telegram
 bot.action(/auth_(.+)_(.+)/, (ctx) => {
     const email = ctx.match[1];
     const tappedNumber = parseInt(ctx.match[2]);
     const session = activeAuths[email];
 
     if (session && session.number === tappedNumber) {
-        // SUCCESS: Tell the browser to log in!
         io.to(session.socketId).emit('login_success');
-        
-        ctx.editMessageText(`✅ Verified! You logged in as ${email}`);
+        ctx.editMessageText(`✅ *Verified!*\nLogged in as: ${email}`, { parse_mode: 'Markdown' });
         delete activeAuths[email];
     } else {
-        ctx.answerCbQuery("❌ Wrong number! Try again.");
+        ctx.answerCbQuery("❌ Wrong number! Look at the screen again.");
     }
 });
 
-bot.launch();
-http.listen(3000, () => console.log('🚀 2FA System Live at http://localhost:3000'));
+// --- STEP 3: STARTUP ---
+// Use process.env.PORT so Render can choose the port automatically
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => {
+    console.log(`🚀 Server running on port \${PORT}`);
+    bot.launch();
+});
