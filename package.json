@@ -1,0 +1,13 @@
+{
+  "name": "my-2fa-system",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "telegraf": "^4.12.0",
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
